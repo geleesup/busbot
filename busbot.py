@@ -51,6 +51,15 @@ class Cbuffer:
 
         
 class Bus:
+
+    tripTime = dict()
+    tripTime['PPL-MTN'] = 0
+    tripTime['PPL-RES'] = 0
+    tripTime['MTN-PPL'] = 0
+    tripTime['MTN-RES'] = 0
+    tripTime['RES-MTN'] = 0
+    tripTime['RES-PPL'] = 0
+
     def __init__(self, name, data):
         self.name = name
         #self.track = Cbuffer(BUFFER_SIZE)
@@ -76,11 +85,26 @@ class Bus:
         currTimeSec = self.time[timeIndex]/1000
         return datetime.datetime.fromtimestamp(currTimeSec).strftime('%Y-%m-%d %H:%M')
 
+    def logTrip(self, DEP_STATION, DEP_TIMESTAMP, ARR_STATION, ARR_TIMESTAMP):
+        alpha = 0.9
+        key = DEP_STATION + '-' + ARR_STATION
+        durationMSec = ARR_TIMESTAMP - DEP_TIMESTAMP
+        prevDurationMSec = Bus.tripTime[key]
+        Bus.tripTime[key] = alpha*durationMSec + (1-alpha)*prevDurationMSec
+
+        print '%s -> %s (%.2fm)' % (DEP_STATION, ARR_STATION, (durationMSec/1000.0)/60)
+
     def analyzeTrack(self):
 
         PPL_STATUS = 0
         MTN_STATUS = 0
         RES_STATUS = 0
+
+        DEP_TIMESTAMP = 0
+        ARR_TIMESTAMP = 0
+
+        DEP_STATION = ''
+        ARR_STATION = ''
 
         for i in xrange(len(self.lat)):
             lat = float(self.lat[i])
@@ -105,21 +129,53 @@ class Bus:
                 # In-Between Stops
 
                 if PPL_STATUS > 0:
+                    DEP_TIMESTAMP = self.time[i]
+                    DEP_STATION = 'PPL'
                     print 'Leaving  PP  (%s)' % self.getTimestamp(i)
                     PPL_STATUS = 0
                 elif MTN_STATUS > 0:
+                    DEP_TIMESTAMP = self.time[i]
+                    DEP_STATION = 'MTN'
                     print 'Leaving  MTN (%s)' % self.getTimestamp(i)
                     MTN_STATUS = 0
                 elif RES_STATUS > 0:
+                    DEP_TIMESTAMP = self.time[i]
+                    DEP_STATION = 'RES'
                     print 'Leaving  RES (%s)' % self.getTimestamp(i)
                     RES_STATUS = 0
 
             if PPL_STATUS == 1:
+                ARR_TIMESTAMP = self.time[i]
+                ARR_STATION = 'PPL'
                 print 'Arriving PP  (%s)' % self.getTimestamp(i)
+
+                if DEP_STATION == '':
+                    ARR_STATION = ''
+                    ARR_TIMESTAMP = 0
+                else:
+                    self.logTrip(DEP_STATION, DEP_TIMESTAMP, ARR_STATION, ARR_TIMESTAMP)
+
             elif MTN_STATUS == 1:
+                ARR_TIMESTAMP = self.time[i]
+                ARR_STATION = 'MTN'
                 print 'Arriving MTN (%s)' % self.getTimestamp(i)
+
+                if DEP_STATION == '':
+                    ARR_STATION = ''
+                    ARR_TIMESTAMP = 0
+                else:
+                    self.logTrip(DEP_STATION, DEP_TIMESTAMP, ARR_STATION, ARR_TIMESTAMP)
+
             elif RES_STATUS == 1:
+                ARR_TIMESTAMP = self.time[i]
+                ARR_STATION = 'RES'
                 print 'Arriving RES (%s)' % self.getTimestamp(i)
+                
+                if DEP_STATION == '':
+                    ARR_STATION = ''
+                    ARR_TIMESTAMP = 0
+                else:
+                    self.logTrip(DEP_STATION, DEP_TIMESTAMP, ARR_STATION, ARR_TIMESTAMP)
 
 LOG = 0
 RUN_LIVE = 0
