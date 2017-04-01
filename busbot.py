@@ -67,7 +67,9 @@ class Bus:
         self.lng = []
         self.time = []
         self.config = dict()
+        self.nextStop = dict()
         self.parse(data)
+
     def parse(self, data):
         pos = data['Positions'][self.name]
         timestamp = data['LastTime']
@@ -80,19 +82,43 @@ class Bus:
         self.lng.append(lng)
         self.time.append(timestamp)
         self.config = conf
+        self._setupRoute(self.config['route'])
 
     def getTimestamp(self,timeIndex):
         currTimeSec = self.time[timeIndex]/1000
         return datetime.datetime.fromtimestamp(currTimeSec).strftime('%Y-%m-%d %H:%M')
 
+    def formatTimeStamp(self,timeMSec):
+        return datetime.datetime.fromtimestamp(timeMSec/1000).strftime('%H:%M')
+
     def logTrip(self, DEP_STATION, DEP_TIMESTAMP, ARR_STATION, ARR_TIMESTAMP):
-        alpha = 0.9
+        alpha = 0.90
         key = DEP_STATION + '-' + ARR_STATION
         durationMSec = ARR_TIMESTAMP - DEP_TIMESTAMP
         prevDurationMSec = Bus.tripTime[key]
         Bus.tripTime[key] = alpha*durationMSec + (1-alpha)*prevDurationMSec
 
         print '%s -> %s (%.2fm)' % (DEP_STATION, ARR_STATION, (durationMSec/1000.0)/60)
+
+    def _setupRoute(self, route):
+        if route == 'MTN - PP - LOOP':
+            self.nextStop['MTN'] = 'PPL'
+            self.nextStop['PPL'] = 'MTN'
+
+        elif route == 'MTN -  RES - PP LOOP' or route == 'MNT- RES -PP- LOOP':
+            self.nextStop['MTN'] = 'RES'
+            self.nextStop['RES'] = 'PPL'
+            self.nextStop['PPL'] = 'MTN'
+
+        elif route == ' MTN -  PP - RES - LOOP':
+            self.nextStop['MTN'] = 'PPL'
+            self.nextStop['PPL'] = 'RES'
+            self.nextStop['RES'] = 'MTN'
+
+    def _computeNextTime(self, DEP_STATION, currTime):
+        key = DEP_STATION + '-' + self.nextStop[DEP_STATION]
+        nextTime = currTime + self.tripTime[key]
+        return [self.nextStop[DEP_STATION], nextTime]
 
     def analyzeTrack(self):
 
@@ -126,56 +152,59 @@ class Bus:
             elif (RES_LAT_DIFF <= RES_RAD) and (RES_LNG_DIFF <= RES_RAD):
                 RES_STATUS = RES_STATUS+1
             else:
+
                 # In-Between Stops
+                LEAVING = PPL_STATUS > 0 or MTN_STATUS > 0 or RES_STATUS > 0
 
-                if PPL_STATUS > 0:
-                    DEP_TIMESTAMP = self.time[i]
-                    DEP_STATION = 'PPL'
-                    print 'Leaving  PP  (%s)' % self.getTimestamp(i)
-                    PPL_STATUS = 0
-                elif MTN_STATUS > 0:
-                    DEP_TIMESTAMP = self.time[i]
-                    DEP_STATION = 'MTN'
-                    print 'Leaving  MTN (%s)' % self.getTimestamp(i)
-                    MTN_STATUS = 0
-                elif RES_STATUS > 0:
-                    DEP_TIMESTAMP = self.time[i]
-                    DEP_STATION = 'RES'
-                    print 'Leaving  RES (%s)' % self.getTimestamp(i)
-                    RES_STATUS = 0
+                if LEAVING:
+                    if PPL_STATUS:
+                        DEP_STATION = 'PPL'
+                        PPL_STATUS = 0
+                    elif MTN_STATUS:
+                        DEP_STATION = 'MTN'
+                        MTN_STATUS = 0
+                    elif RES_STATUS:
+                        DEP_STATION = 'RES'
+                        RES_STATUS = 0
 
-            if PPL_STATUS == 1:
+                    DEP_TIMESTAMP = self.time[i]
+                    
+                    print 'Leaving  %s (%s)' % (DEP_STATION, self.getTimestamp(i))
+
+                    [nextStation, nextTime] = self._computeNextTime(DEP_STATION, self.time[i])
+                    print '%s | %s' % (nextStation, self.formatTimeStamp(nextTime))
+
+                    [nextStation, nextTime] = self._computeNextTime(nextStation, nextTime)
+                    print '%s | %s' % (nextStation, self.formatTimeStamp(nextTime))
+
+                    if len(self.nextStop) == 3:
+                        [nextStation, nextTime] = self._computeNextTime(nextStation, nextTime)
+                        print '%s | %s' % (nextStation, self.formatTimeStamp(nextTime))
+
+
+            ARRIVING = PPL_STATUS == 1 or MTN_STATUS == 1 or RES_STATUS == 1
+
+            if ARRIVING:
+
+                if PPL_STATUS:
+                    ARR_STATION = 'PPL'
+                elif MTN_STATUS:
+                    ARR_STATION = 'MTN'
+                elif RES_STATUS:
+                    ARR_STATION = 'RES'
+
                 ARR_TIMESTAMP = self.time[i]
-                ARR_STATION = 'PPL'
-                print 'Arriving PP  (%s)' % self.getTimestamp(i)
+
+                print 'Arriving %s (%s)' % (ARR_STATION, self.getTimestamp(i))
 
                 if DEP_STATION == '':
                     ARR_STATION = ''
                     ARR_TIMESTAMP = 0
                 else:
-                    self.logTrip(DEP_STATION, DEP_TIMESTAMP, ARR_STATION, ARR_TIMESTAMP)
+                    self.logTrip(DEP_STATION, DEP_TIMESTAMP, ARR_STATION,
+                        ARR_TIMESTAMP)
 
-            elif MTN_STATUS == 1:
-                ARR_TIMESTAMP = self.time[i]
-                ARR_STATION = 'MTN'
-                print 'Arriving MTN (%s)' % self.getTimestamp(i)
 
-                if DEP_STATION == '':
-                    ARR_STATION = ''
-                    ARR_TIMESTAMP = 0
-                else:
-                    self.logTrip(DEP_STATION, DEP_TIMESTAMP, ARR_STATION, ARR_TIMESTAMP)
-
-            elif RES_STATUS == 1:
-                ARR_TIMESTAMP = self.time[i]
-                ARR_STATION = 'RES'
-                print 'Arriving RES (%s)' % self.getTimestamp(i)
-                
-                if DEP_STATION == '':
-                    ARR_STATION = ''
-                    ARR_TIMESTAMP = 0
-                else:
-                    self.logTrip(DEP_STATION, DEP_TIMESTAMP, ARR_STATION, ARR_TIMESTAMP)
 
 LOG = 0
 RUN_LIVE = 0
