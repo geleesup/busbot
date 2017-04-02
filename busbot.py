@@ -52,6 +52,8 @@ class Cbuffer:
         
 class Bus:
 
+    # Data shared between busses
+
     tripTime = dict()
     tripTime['PPL-MTN'] = 0
     tripTime['PPL-RES'] = 0
@@ -60,15 +62,38 @@ class Bus:
     tripTime['RES-MTN'] = 0
     tripTime['RES-PPL'] = 0
 
+    stopTime = dict()
+    stopTime['MTN'] = 0
+    stopTime['PPL'] = 0
+    stopTime['RES'] = 0
+
     def __init__(self, name, data):
         self.name = name
         #self.track = Cbuffer(BUFFER_SIZE)
         self.lat = []
         self.lng = []
         self.time = []
+
         self.config = dict()
         self.nextStop = dict()
+
+        self.pplStatus = 0
+        self.mtnStatus = 0
+        self.resStatus = 0
+
+        self.depTimestamp = 0
+        self.arrTimestamp = 0
+
+        self.depStation = ''
+        self.arrStation = ''
+
+        self.eta = []
+
         self.parse(data)
+
+        # Required to call parse before
+        self._setupRoute(self.config['route'])
+
 
     def parse(self, data):
         pos = data['Positions'][self.name]
@@ -82,7 +107,7 @@ class Bus:
         self.lng.append(lng)
         self.time.append(timestamp)
         self.config = conf
-        self._setupRoute(self.config['route'])
+        self.updateTrack(lat,lng,timestamp)
 
     def getTimestamp(self,timeIndex):
         currTimeSec = self.time[timeIndex]/1000
@@ -99,6 +124,14 @@ class Bus:
         Bus.tripTime[key] = alpha*durationMSec + (1-alpha)*prevDurationMSec
 
         print '%s -> %s (%.2fm)' % (DEP_STATION, ARR_STATION, (durationMSec/1000.0)/60)
+
+    def logStop(self, station, arrTimestamp, depTimestamp):
+        alpha = 0.90
+        durationMSec = depTimestamp - arrTimestamp
+        prevDurationMSec = Bus.stopTime[station]
+        Bus.stopTime[station] = alpha*durationMSec + (1-alpha)*prevDurationMSec
+        
+        print '%s Stop Time (%.2fm)' % (station, (durationMSec/1000.0)/60)
 
     def _setupRoute(self, route):
         if route == 'MTN - PP - LOOP':
@@ -145,6 +178,7 @@ class Bus:
             RES_LAT_DIFF = abs(lat-RES_COORD[0])
             RES_LNG_DIFF = abs(lng-RES_COORD[1])
 
+            # Arriving at stop/Waiting at Stop
             if (PPL_LAT_DIFF <= PPL_RAD) and (PPL_LNG_DIFF <= PPL_RAD):
                 PPL_STATUS = PPL_STATUS+1
             elif (MTN_LAT_DIFF <= MTN_RAD) and (MTN_LNG_DIFF <= MTN_RAD):
@@ -205,6 +239,85 @@ class Bus:
                         ARR_TIMESTAMP)
 
 
+    def updateTrack(self, lat, lng, currTime):
+
+        lat = float(lat)
+        lng = float(lng)
+
+        PPL_LAT_DIFF = abs(lat-PPL_COORD[0])
+        PPL_LNG_DIFF = abs(lng-PPL_COORD[1])
+
+        MTN_LAT_DIFF = abs(lat-MTN_COORD[0])
+        MTN_LNG_DIFF = abs(lng-MTN_COORD[1])
+        
+        RES_LAT_DIFF = abs(lat-RES_COORD[0])
+        RES_LNG_DIFF = abs(lng-RES_COORD[1])
+
+        if (PPL_LAT_DIFF <= PPL_RAD) and (PPL_LNG_DIFF <= PPL_RAD):
+            self.pplStatus = self.pplStatus+1
+        elif (MTN_LAT_DIFF <= MTN_RAD) and (MTN_LNG_DIFF <= MTN_RAD):
+            self.mtnStatus = self.mtnStatus+1
+        elif (RES_LAT_DIFF <= RES_RAD) and (RES_LNG_DIFF <= RES_RAD):
+            self.resStatus = self.resStatus+1
+        else:
+
+            # In-Between Stops
+            LEAVING = self.pplStatus > 0 or self.mtnStatus > 0 or self.resStatus > 0
+
+            if LEAVING:
+                if self.pplStatus:
+                    self.depStation = 'PPL'
+                    self.pplStatus = 0
+                elif self.mtnStatus:
+                    self.depStation = 'MTN'
+                    self.mtnStatus = 0
+                elif self.resStatus:
+                    self.depStation = 'RES'
+                    self.resStatus = 0
+
+                self.depTimestamp = currTime
+                
+                print '%s Leaving  %s (%s)' % (self.config['color'], self.depStation, self.formatTimeStamp(currTime))
+
+                if self.depStation == self.arrStation:
+                    self.logStop(self.depStation, self.arrTimestamp, self.depTimestamp)
+
+                self.eta = []
+
+                # Seed first station and time with the current one
+                nextStation = self.depStation
+                nextTime = currTime
+                
+                numStops = len(self.nextStop)
+                
+                for i in xrange(numStops):
+                    [nextStation, nextTime] = self._computeNextTime(nextStation, nextTime)
+                    self.eta.append([nextStation, nextTime])
+                    print '%s | %s' % (nextStation, self.formatTimeStamp(nextTime))
+                    nextTime = nextTime + Bus.stopTime[nextStation]
+
+        ARRIVING = self.pplStatus == 1 or self.mtnStatus == 1 or self.resStatus == 1
+
+        if ARRIVING:
+
+            if self.pplStatus:
+                self.arrStation = 'PPL'
+            elif self.mtnStatus:
+                self.arrStation = 'MTN'
+            elif self.resStatus:
+                self.arrStation = 'RES'
+
+            self.arrTimestamp = currTime
+
+            print '%s Arriving %s (%s)' % (self.config['color'], self.arrStation, self.formatTimeStamp(currTime))
+
+            if self.depStation == '':
+                self.arrStation = ''
+                self.arrTimestamp = 0
+            else:
+                self.logTrip(self.depStation, self.depTimestamp, self.arrStation,
+                    self.arrTimestamp)
+
 
 LOG = 0
 RUN_LIVE = 0
@@ -226,4 +339,5 @@ if RUN_LIVE == 0:
             else:
                 busses[id] = Bus(id, data)
 
+        #time.sleep(1)
 
