@@ -2,6 +2,7 @@ import urllib2
 import json
 import time
 import datetime
+import BotClient
 
 URL = 'http://shuttlebusapp.azurewebsites.net/position'
 FILENAME = 'GPSLog.txt'
@@ -37,6 +38,9 @@ def logData(f, logTimeMinutes, periodSec=5):
         f.write('\n')
         print '%d / %d' % (x+1, numIterations)
         time.sleep(periodSec)
+
+def formatTimeStamp(timeMSec):
+    return datetime.datetime.fromtimestamp(timeMSec/1000).strftime('%H:%M')
 
 class Cbuffer:
     def __init__(self, length):
@@ -112,9 +116,6 @@ class Bus:
     def getTimestamp(self,timeIndex):
         currTimeSec = self.time[timeIndex]/1000
         return datetime.datetime.fromtimestamp(currTimeSec).strftime('%Y-%m-%d %H:%M')
-
-    def formatTimeStamp(self,timeMSec):
-        return datetime.datetime.fromtimestamp(timeMSec/1000).strftime('%H:%M')
 
     def logTrip(self, DEP_STATION, DEP_TIMESTAMP, ARR_STATION, ARR_TIMESTAMP):
         alpha = 0.90
@@ -206,14 +207,14 @@ class Bus:
                     print 'Leaving  %s (%s)' % (DEP_STATION, self.getTimestamp(i))
 
                     [nextStation, nextTime] = self._computeNextTime(DEP_STATION, self.time[i])
-                    print '%s | %s' % (nextStation, self.formatTimeStamp(nextTime))
+                    print '%s | %s' % (nextStation, formatTimeStamp(nextTime))
 
                     [nextStation, nextTime] = self._computeNextTime(nextStation, nextTime)
-                    print '%s | %s' % (nextStation, self.formatTimeStamp(nextTime))
+                    print '%s | %s' % (nextStation, formatTimeStamp(nextTime))
 
                     if len(self.nextStop) == 3:
                         [nextStation, nextTime] = self._computeNextTime(nextStation, nextTime)
-                        print '%s | %s' % (nextStation, self.formatTimeStamp(nextTime))
+                        print '%s | %s' % (nextStation, formatTimeStamp(nextTime))
 
 
             ARRIVING = PPL_STATUS == 1 or MTN_STATUS == 1 or RES_STATUS == 1
@@ -277,7 +278,7 @@ class Bus:
 
                 self.depTimestamp = currTime
                 
-                print '%s Leaving  %s (%s)' % (self.config['color'], self.depStation, self.formatTimeStamp(currTime))
+                print '%s Leaving  %s (%s)' % (self.config['color'], self.depStation, formatTimeStamp(currTime))
 
                 if self.depStation == self.arrStation:
                     self.logStop(self.depStation, self.arrTimestamp, self.depTimestamp)
@@ -293,7 +294,7 @@ class Bus:
                 for i in xrange(numStops):
                     [nextStation, nextTime] = self._computeNextTime(nextStation, nextTime)
                     self.eta.append([nextStation, nextTime])
-                    print '%s | %s' % (nextStation, self.formatTimeStamp(nextTime))
+                    print '%s | %s' % (nextStation, formatTimeStamp(nextTime))
                     nextTime = nextTime + Bus.stopTime[nextStation]
 
         ARRIVING = self.pplStatus == 1 or self.mtnStatus == 1 or self.resStatus == 1
@@ -309,7 +310,7 @@ class Bus:
 
             self.arrTimestamp = currTime
 
-            print '%s Arriving %s (%s)' % (self.config['color'], self.arrStation, self.formatTimeStamp(currTime))
+            print '%s Arriving %s (%s)' % (self.config['color'], self.arrStation, formatTimeStamp(currTime))
 
             if self.depStation == '':
                 self.arrStation = ''
@@ -328,7 +329,41 @@ if LOG:
 
 busses = dict()
 
-if RUN_LIVE == 0:
+def getETAString():
+    busid = busses.keys()
+    response = ''
+
+    for id in busid:
+        if busses[id].config['hidden']:
+            continue
+        eta = busses[id].eta
+        response = response + busses[id].config['color'] + '\n'
+        for i in xrange(len(eta)):
+            stopInfo = eta[i]
+            response = response + '%s\t| %s\n' % (stopInfo[0], formatTimeStamp(stopInfo[1]))
+        response = response + '\n'
+
+    return response
+
+BC = BotClient.BotClient('busbot','SLACK_BOT_TOKEN',getETAString)
+BC.connect()
+
+if RUN_LIVE:
+    while True:
+        line = getData(URL)
+        data = parseJSON(line)
+        busid = data['Positions'].keys()
+        for id in busid:
+            if busses.has_key(id):
+                busses[id].parse(data)
+            else:
+                busses[id] = Bus(id, data)
+
+        BC.read()
+        #print getETAString()
+        time.sleep(5)
+
+else:
     f = open(FILENAME,'r')
     for line in f:
         data = parseJSON(line)
@@ -339,5 +374,7 @@ if RUN_LIVE == 0:
             else:
                 busses[id] = Bus(id, data)
 
-        #time.sleep(1)
+        BC.read()
+        #print getETAString()
+        time.sleep(1)
 
