@@ -16,7 +16,7 @@ RES_COORD = [42.30165, -71.47266]
 # RES LEFT = [42.30175, -71.47290]
 # MTN = [42.30145
 
-RES_RAD = 0.00025
+RES_RAD = 0.00026
 MTN_RAD = 0.00010
 PPL_RAD = 0.00010
 
@@ -96,7 +96,8 @@ class Bus:
         self.parse(data)
 
         # Required to call parse before
-        self._setupRoute(self.config['route'])
+        # self._setupRoute(self.config['route'])
+        self._setupRouteByColor(self.config['color'])
 
 
     def parse(self, data):
@@ -121,10 +122,11 @@ class Bus:
         alpha = 0.90
         key = DEP_STATION + '-' + ARR_STATION
         durationMSec = ARR_TIMESTAMP - DEP_TIMESTAMP
-        prevDurationMSec = Bus.tripTime[key]
-        Bus.tripTime[key] = alpha*durationMSec + (1-alpha)*prevDurationMSec
+        if Bus.tripTime.has_key(key):
+            prevDurationMSec = Bus.tripTime[key]
+            Bus.tripTime[key] = alpha*durationMSec + (1-alpha)*prevDurationMSec
 
-        print '%s -> %s (%.2fm)' % (DEP_STATION, ARR_STATION, (durationMSec/1000.0)/60)
+            print '%s -> %s (%.2fm)' % (DEP_STATION, ARR_STATION, (durationMSec/1000.0)/60)
 
     def logStop(self, station, arrTimestamp, depTimestamp):
         alpha = 0.90
@@ -145,6 +147,21 @@ class Bus:
             self.nextStop['PPL'] = 'MTN'
 
         elif route == ' MTN -  PP - RES - LOOP':
+            self.nextStop['MTN'] = 'PPL'
+            self.nextStop['PPL'] = 'RES'
+            self.nextStop['RES'] = 'MTN'
+
+    def _setupRouteByColor(self, color):
+        if color == 'YELLOW':
+            self.nextStop['MTN'] = 'PPL'
+            self.nextStop['PPL'] = 'MTN'
+
+        elif color == 'RED':
+            self.nextStop['MTN'] = 'RES'
+            self.nextStop['RES'] = 'PPL'
+            self.nextStop['PPL'] = 'MTN'
+
+        elif color == 'BLUE':
             self.nextStop['MTN'] = 'PPL'
             self.nextStop['PPL'] = 'RES'
             self.nextStop['RES'] = 'MTN'
@@ -321,7 +338,7 @@ class Bus:
 
 
 LOG = 0
-RUN_LIVE = 0
+RUN_LIVE = 1
 if LOG:
     f = initLog(FILENAME)
     logData(f, 5)
